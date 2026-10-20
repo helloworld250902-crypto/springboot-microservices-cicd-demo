@@ -1,41 +1,38 @@
-# Spring Boot Microservices CI/CD Demo Design
+# Spring Boot 微服务 CI/CD 演示项目设计规格
 
-## Purpose
+## 项目目标
 
-Build a small, runnable teaching repository that shows how Spring Boot, Maven,
-Docker, Jenkins, Kubernetes, and GitHub participate in one delivery flow. The
-repository must make the call chain between configuration files explicit and
-must demonstrate both an automatically triggered test deployment and a
-manually triggered production deployment.
+构建一个简单、可运行的教学代码库，展示 Spring Boot、Maven、Docker、
+Jenkins、Kubernetes 和 GitHub 如何组成一条完整的交付流水线。代码库必须
+清楚说明各配置文件之间的调用关系，并分别演示自动触发的测试环境部署和
+手动触发的生产环境部署。
 
-The repository will be published as the public GitHub repository
-`helloworld250902-crypto/springboot-microservices-cicd-demo`.
+代码库最终发布为公开 GitHub 仓库：
+`helloworld250902-crypto/springboot-microservices-cicd-demo`。
 
-## Scope
+## 项目范围
 
-The demo contains two Spring Boot services:
+演示项目包含两个 Spring Boot 服务：
 
-- `product-service` owns an in-memory product catalog and exposes product
-  lookup endpoints.
-- `order-service` accepts an order request, calls `product-service`, and returns
-  an order summary containing the selected product and calculated total.
+- `product-service`：维护内存中的商品目录，并提供商品查询接口。
+- `order-service`：接收下单请求，调用 `product-service`，返回包含商品信息和
+  总金额的订单摘要。
 
-The focus is the delivery flow, so the demo deliberately excludes databases,
-message brokers, service registries, API gateways, authentication, Helm, and
-cloud-specific Kubernetes services.
+项目重点是展示交付流程，因此不引入数据库、消息队列、服务注册中心、
+API 网关、身份认证、Helm 或特定云厂商的 Kubernetes 服务。
 
-## Technology Baseline
+## 技术基线
 
-- Java 21.
-- Spring Boot 4.1.1.
-- Maven Wrapper and a Maven multi-module reactor build.
-- Docker images based on an Eclipse Temurin Java 21 runtime image.
-- Docker Compose for local container integration.
-- Plain Kubernetes resources organized with Kustomize bases and overlays.
-- Jenkins declarative pipelines.
-- GitHub Container Registry (GHCR) for images.
+- Java 21。
+- Spring Boot 4.1.1。
+- Maven Wrapper 和 Maven 多模块 Reactor 构建。
+- 基于 Eclipse Temurin Java 21 运行时镜像构建 Docker 镜像。
+- 使用 Docker Compose 进行本地容器联调。
+- 使用 Kustomize base 和 overlay 组织原生 Kubernetes 资源。
+- 使用 Jenkins 声明式流水线。
+- 使用 GitHub Container Registry（GHCR）存储镜像。
 
-## Repository Structure
+## 代码库结构
 
 ```text
 springboot-microservices-cicd-demo/
@@ -65,11 +62,11 @@ springboot-microservices-cicd-demo/
 └── README.md
 ```
 
-## Service Contracts
+## 服务接口约定
 
-### Product service
+### 商品服务
 
-`GET /api/products/{id}` returns an existing product:
+`GET /api/products/{id}` 查询已存在的商品：
 
 ```json
 {
@@ -79,14 +76,14 @@ springboot-microservices-cicd-demo/
 }
 ```
 
-An unknown product ID returns HTTP 404 using Spring `ProblemDetail`, with
-`title` set to `Product not found` and `detail` identifying the requested ID.
+商品 ID 不存在时，以 Spring `ProblemDetail` 格式返回 HTTP 404，其中
+`title` 为 `Product not found`，`detail` 指明请求的商品 ID。
 
-`GET /actuator/health` is used by Docker, Kubernetes, and smoke tests.
+`GET /actuator/health` 供 Docker、Kubernetes 和冒烟测试执行健康检查。
 
-### Order service
+### 订单服务
 
-`POST /api/orders` accepts:
+`POST /api/orders` 接收：
 
 ```json
 {
@@ -95,7 +92,8 @@ An unknown product ID returns HTTP 404 using Spring `ProblemDetail`, with
 }
 ```
 
-It calls `GET {product-service-url}/api/products/{id}` and returns HTTP 201:
+订单服务调用 `GET {product-service-url}/api/products/{id}`，成功时返回
+HTTP 201：
 
 ```json
 {
@@ -108,186 +106,168 @@ It calls `GET {product-service-url}/api/products/{id}` and returns HTTP 201:
 }
 ```
 
-The request rejects a missing product ID or a quantity below one with HTTP
-400. A missing product returns HTTP 404. An unreachable product service returns
-HTTP 503. Prices and totals use `BigDecimal` with two decimal places. Orders
-are not persisted. The inter-service client uses Spring `RestClient` without
-an additional HTTP-client dependency.
+缺少商品 ID 或数量小于 1 时返回 HTTP 400；商品不存在时返回 HTTP 404；
+商品服务无法访问时返回 HTTP 503。价格和总金额使用保留两位小数的
+`BigDecimal`。订单不持久化。服务间调用使用 Spring `RestClient`，不添加
+额外的 HTTP 客户端依赖。
 
-`GET /actuator/health` is used by Docker, Kubernetes, and smoke tests.
+`GET /actuator/health` 供 Docker、Kubernetes 和冒烟测试执行健康检查。
 
-## Configuration Call Chain
+## 配置文件调用关系
 
-The root `pom.xml` declares both service modules, Java 21, and Spring Boot
-4.1.1. Each child `pom.xml` inherits those versions and declares only its own
-dependencies. Running `./mvnw clean verify` therefore builds and tests both
-services in one Maven reactor.
+根目录 `pom.xml` 声明两个服务模块、Java 21 和 Spring Boot 4.1.1。每个
+子模块的 `pom.xml` 继承这些版本，只声明自身需要的依赖。因此执行
+`./mvnw clean verify` 会在同一个 Maven Reactor 中构建并测试两个服务。
 
-Each service `Dockerfile` copies the corresponding JAR created under
-`<service>/target/`. Docker image creation is therefore downstream of the
-Maven package phase.
+每个服务的 `Dockerfile` 复制 Maven 在对应 `<service>/target/` 目录生成的
+JAR。因此，Docker 镜像构建依赖 Maven package 阶段的产物。
 
-Each service `application.yml` supplies a local default. The order service
-reads `PRODUCT_SERVICE_URL`, defaulting to `http://localhost:8081`.
-`docker-compose.yml` overrides that variable with
-`http://product-service:8081`, where `product-service` is the Compose service
-name. Kubernetes Deployments set the same variable to
-`http://product-service:8081`, where `product-service` is the Kubernetes
-Service DNS name.
+每个服务的 `application.yml` 提供本地默认配置。订单服务读取
+`PRODUCT_SERVICE_URL`，默认值为 `http://localhost:8081`。
+`docker-compose.yml` 将其覆盖为 `http://product-service:8081`，这里的
+`product-service` 是 Compose 服务名。Kubernetes Deployment 设置相同的
+地址，此时 `product-service` 是 Kubernetes Service 的 DNS 名称。
 
-The Kubernetes base contains namespace-independent Deployments and Services.
-The `test` and `production` overlays select their namespace, replica count,
-image tag, and environment-specific labels. Jenkins invokes
-`kubectl apply -k` against the chosen overlay.
+Kubernetes base 保存与环境无关的 Deployment 和 Service。`test` 与
+`production` overlay 分别设置命名空间、副本数、镜像标签和环境标签。
+Jenkins 对目标 overlay 执行 `kubectl apply -k`。
 
-## Local Developer Flow
+## 本地开发流程
 
-The README presents the configuration chain in increasing order of
-abstraction:
+README 按抽象层级从低到高介绍配置调用链：
 
-1. `./mvnw clean verify` compiles and tests both services.
-2. `./mvnw package` produces both executable JARs.
-3. Running both JARs demonstrates local application configuration.
-4. `docker compose up --build` demonstrates Docker image construction,
-   container DNS, and service-to-service communication.
-5. `kubectl apply -k k8s/overlays/test` demonstrates the same images and
-   environment variables under Kubernetes.
+1. `./mvnw clean verify` 编译并测试两个服务。
+2. `./mvnw package` 生成两个可执行 JAR。
+3. 直接运行两个 JAR，演示本地应用配置。
+4. `docker compose up --build` 演示 Docker 镜像构建、容器 DNS 和服务间调用。
+5. `kubectl apply -k k8s/overlays/test` 演示在 Kubernetes 中使用相同的镜像和
+   环境变量。
 
-## Automatic Test Pipeline
+## 自动触发的测试环境流水线
 
-`jenkins/Jenkinsfile.test` is configured in a Jenkins Pipeline job whose SCM
-branch is `develop`. The job uses the GitHub webhook trigger.
+`jenkins/Jenkinsfile.test` 配置在 Jenkins Pipeline Job 中，其 SCM 分支为
+`develop`，并使用 GitHub Webhook 触发器。
 
-On every push to `develop`, Jenkins:
+每次向 `develop` 分支推送代码后，Jenkins 执行：
 
-1. Checks out the exact Git commit delivered by GitHub.
-2. Runs `./mvnw clean verify`.
-3. Builds both images tagged with the short Git commit SHA.
-4. Logs in to GHCR through a Jenkins username/password credential.
-5. Pushes both images to:
+1. 检出 GitHub 通知中对应的准确 Git 提交。
+2. 运行 `./mvnw clean verify`。
+3. 构建两个 Docker 镜像，并以短 Git 提交 SHA 作为标签。
+4. 使用 Jenkins 中保存的用户名/密码类型凭证登录 GHCR。
+5. 推送两个镜像：
    - `ghcr.io/helloworld250902-crypto/product-service:<git-sha>`
    - `ghcr.io/helloworld250902-crypto/order-service:<git-sha>`
-6. Updates the test overlay to use that immutable tag without committing the
-   generated substitution.
-7. Applies `k8s/overlays/test` using a test kubeconfig credential.
-8. Waits for both Deployments to complete their rollout.
-9. Runs the smoke test against the test environment.
+6. 将 test overlay 的镜像替换为该不可变标签，但不提交临时替换结果。
+7. 使用测试环境 kubeconfig 凭证应用 `k8s/overlays/test`。
+8. 等待两个 Deployment 完成滚动发布。
+9. 对测试环境执行冒烟测试。
 
-Any failed test, image build, image push, rollout, or smoke check stops the
-pipeline and prevents subsequent stages.
+测试、镜像构建、镜像推送、滚动发布或冒烟测试中的任何一步失败，都会终止
+流水线，并阻止后续阶段运行。
 
-## Manual Production Pipeline
+## 手动触发的生产环境流水线
 
-`jenkins/Jenkinsfile.production` has no automatic trigger. It exposes two
-parameters through Jenkins `Build with Parameters`:
+`jenkins/Jenkinsfile.production` 不配置自动触发器。它通过 Jenkins 的
+`Build with Parameters` 提供两个参数：
 
-- `IMAGE_TAG`: a Git SHA image tag that already passed the test pipeline.
-- `CONFIRM_DEPLOYMENT`: must equal `DEPLOY`.
+- `IMAGE_TAG`：已经通过测试环境流水线的 Git SHA 镜像标签。
+- `CONFIRM_DEPLOYMENT`：值必须为 `DEPLOY`。
 
-The production pipeline:
+生产环境流水线执行：
 
-1. Validates the parameters.
-2. Authenticates to GHCR and verifies that both requested images exist.
-3. Uses the existing images; it does not compile code or rebuild them.
-4. Applies the production Kustomize overlay using a separate production
-   kubeconfig credential.
-5. Waits for both Deployments to complete their rollout.
-6. Runs the smoke test against the production environment.
+1. 校验输入参数。
+2. 登录 GHCR，并确认指定标签的两个镜像都存在。
+3. 直接使用现有镜像，不重新编译代码，也不重新构建镜像。
+4. 使用独立的生产环境 kubeconfig 凭证应用 production overlay。
+5. 等待两个 Deployment 完成滚动发布。
+6. 对生产环境执行冒烟测试。
 
-Reusing the same immutable image tag ensures that production receives the
-artifact already tested in the test environment.
+生产环境复用同一个不可变镜像标签，确保部署的是已经在测试环境验证过的
+制品。
 
-## Jenkins and GitHub Setup
+## Jenkins 与 GitHub 配置
 
-The README will show how to create two Pipeline jobs from SCM:
+README 将说明如何创建两个来自 SCM 的 Pipeline Job：
 
-- `microservices-test`: points at `jenkins/Jenkinsfile.test`, tracks
-  `develop`, and receives the GitHub webhook.
-- `microservices-production`: points at
-  `jenkins/Jenkinsfile.production`, tracks `main`, and is started manually.
+- `microservices-test`：指向 `jenkins/Jenkinsfile.test`，跟踪 `develop`
+  分支，并接收 GitHub Webhook。
+- `microservices-production`：指向 `jenkins/Jenkinsfile.production`，跟踪
+  `main` 分支，由用户手动启动。
 
-It will document these Jenkins credential IDs:
+README 将说明以下 Jenkins 凭证 ID：
 
-- `github-container-registry`: GitHub username plus a token allowed to write
-  and read packages.
-- `kubeconfig-test`: secret file for the test cluster or namespace.
-- `kubeconfig-production`: secret file for the production cluster or
-  namespace.
+- `github-container-registry`：GitHub 用户名，以及具有 package 读写权限的
+  Token。
+- `kubeconfig-test`：测试集群或测试命名空间使用的 secret file。
+- `kubeconfig-production`：生产集群或生产命名空间使用的 secret file。
 
-No credential value, GitHub token, kubeconfig, password, or generated secret
-may be committed. GitHub authentication during initial repository publication
-will use GitHub CLI browser login or another interactive credential mechanism,
-with the user completing the prompt.
+任何凭证值、GitHub Token、kubeconfig、密码或生成的 Secret 都不得提交到
+Git。首次发布 GitHub 仓库时，使用 GitHub CLI 浏览器登录或其他交互式认证
+方式，由用户根据提示完成授权。
 
-## Kubernetes Runtime Design
+## Kubernetes 运行设计
 
-Each service has one Deployment and one ClusterIP Service. Product service
-readiness and liveness probes use `/actuator/health`. Order service uses the
-same probe endpoint and receives `PRODUCT_SERVICE_URL` as an environment
-variable.
+每个服务包含一个 Deployment 和一个 ClusterIP Service。商品服务的存活及
+就绪探针访问 `/actuator/health`。订单服务使用相同的探针地址，并通过环境
+变量接收 `PRODUCT_SERVICE_URL`。
 
-The test overlay deploys one replica of each service to namespace
-`microservices-test`. The production overlay deploys two replicas of each
-service to namespace `microservices-production`. Images use
-`imagePullPolicy: IfNotPresent` because tags are immutable Git SHAs.
+test overlay 在 `microservices-test` 命名空间中为每个服务部署一个副本。
+production overlay 在 `microservices-production` 命名空间中为每个服务部署
+两个副本。由于镜像标签使用不可变的 Git SHA，因此设置
+`imagePullPolicy: IfNotPresent`。
 
-Both namespaces reference an externally created `ghcr-pull-secret`. The
-README supplies the `kubectl create secret docker-registry` commands, but the
-secret contents are never stored in Git. This keeps deployment working even
-when GHCR packages have not been made public.
+两个命名空间都引用在集群外部创建的 `ghcr-pull-secret`。README 提供
+`kubectl create secret docker-registry` 命令，但不在 Git 中保存 Secret 内容。
+即使 GHCR package 尚未设置为公开，Kubernetes 也能通过该 Secret 拉取镜像。
 
-Ingress is intentionally excluded. Verification uses `kubectl port-forward`
-or a configurable external base URL supplied to the smoke-test script.
+项目不包含 Ingress。验证时使用 `kubectl port-forward`，或者向冒烟测试脚本
+提供可配置的外部基础 URL。
 
-The automatic webhook example requires Jenkins to have an HTTPS URL reachable
-by GitHub. The README states this prerequisite and shows where to copy the
-Jenkins GitHub webhook endpoint; it does not prescribe a tunneling provider.
+自动 Webhook 示例要求 Jenkins 具有 GitHub 可访问的 HTTPS 地址。README
+说明此前提，并展示 Jenkins GitHub Webhook 地址的填写位置，但不指定具体的
+内网穿透服务商。
 
-## Testing and Verification
+## 测试与验证
 
-Automated tests cover:
+自动测试覆盖：
 
-- Product lookup success and unknown-product 404 behavior.
-- Order request validation.
-- Successful order creation and total calculation.
-- Product-not-found propagation.
-- Product-service-unavailable mapping to HTTP 503.
+- 商品查询成功及未知商品返回 404。
+- 订单请求参数校验。
+- 成功创建订单并正确计算总金额。
+- 商品不存在错误的传递。
+- 商品服务不可用时映射为 HTTP 503。
 
-Repository-level checks cover:
+代码库级别验证包括：
 
-- The Maven reactor test suite.
-- Docker Compose configuration parsing.
-- Docker image builds when Docker is available.
-- Kustomize rendering for test and production overlays.
-- Shell syntax for the smoke-test script.
-- A local end-to-end request through order service when the required runtime is
-  available.
+- Maven Reactor 完整测试套件。
+- Docker Compose 配置解析。
+- Docker 可用时构建镜像。
+- 渲染 test 和 production 两套 Kustomize overlay。
+- 检查冒烟测试脚本的 Shell 语法。
+- 所需运行环境可用时，通过订单服务执行本地端到端请求。
 
-A missing Docker daemon, Kubernetes cluster, registry login, or network access
-is reported as an explicit skipped verification rather than a successful one.
+Docker daemon、Kubernetes 集群、镜像仓库登录或网络访问不可用时，必须明确
+报告对应验证被跳过，不得将其表述为验证成功。
 
-## Documentation Requirements
+## 文档要求
 
-The README must explain each tool's responsibility and include a file-to-file
-call-chain diagram. It must give copyable commands for Maven, direct JAR
-execution, Docker Compose, Kubernetes, Jenkins job creation, GitHub webhook
-setup, manual production deployment, credential setup, troubleshooting, and
-cleanup.
+README 必须解释每种工具的职责，并包含配置文件调用关系图。README 必须
+提供可复制执行的 Maven、直接运行 JAR、Docker Compose、Kubernetes、
+Jenkins Job 创建、GitHub Webhook 配置、手动生产发布、凭证配置、故障排查和
+清理命令。
 
-The README must distinguish configuration committed to Git from credentials
-stored in Jenkins or Kubernetes. It must also explain how automatic test
-deployment differs from manual production promotion.
+README 必须区分提交到 Git 的配置和存储在 Jenkins 或 Kubernetes 中的凭证，
+还必须解释自动测试环境部署与手动生产环境发布之间的区别。
 
-## Acceptance Criteria
+## 验收标准
 
-- A new learner can trace a source-code push from GitHub through Jenkins,
-  Maven, Docker, GHCR, and Kubernetes.
-- `./mvnw clean verify` passes on Java 21.
-- The order endpoint demonstrates a real HTTP call between the two services.
-- Docker Compose starts both services and the order request succeeds.
-- Both Kubernetes overlays render without unresolved placeholders.
-- The automatic test Jenkinsfile and manual production Jenkinsfile clearly
-  demonstrate their different trigger and artifact-promotion behavior.
-- The repository contains no secrets.
-- The completed repository is pushed to
-  `https://github.com/helloworld250902-crypto/springboot-microservices-cicd-demo`.
+- 初学者能够追踪一次源代码推送如何依次经过 GitHub、Jenkins、Maven、
+  Docker、GHCR 和 Kubernetes。
+- 在 Java 21 环境执行 `./mvnw clean verify` 能够通过。
+- 订单接口能够演示两个服务之间真实的 HTTP 调用。
+- Docker Compose 能够启动两个服务，订单请求能够成功完成。
+- 两套 Kubernetes overlay 均能渲染，且不存在未替换的占位符。
+- 自动测试流水线和手动生产流水线清楚展示不同的触发方式与制品晋级行为。
+- 代码库中不包含任何 Secret。
+- 最终代码库推送至
+  `https://github.com/helloworld250902-crypto/springboot-microservices-cicd-demo`。
