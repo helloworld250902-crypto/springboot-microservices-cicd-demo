@@ -1,0 +1,102 @@
+pipeline {
+    agent any
+
+    triggers {
+        githubPush()
+    }
+
+    options {
+        disableConcurrentBuilds()
+        timestamps()
+    }
+
+    environment {
+        REGISTRY = 'ghcr.io/helloworld250902-crypto'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+                script {
+                    env.IMAGE_TAG = sh(
+                        script: 'git rev-parse --short=12 HEAD',
+                        returnStdout: true
+                    ).trim()
+                }
+            }
+        }
+
+        stage('Maven Verify') {
+            steps {
+                sh './mvnw clean verify'
+            }
+        }
+
+        stage('Build and Push Images') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'github-container-registry',
+                    usernameVariable: 'GHCR_USER',
+                    passwordVariable: 'GHCR_TOKEN'
+                )]) {
+                    sh '''
+                        set -eu
+                        echo "$GHCR_TOKEN" | docker login ghcr.io --username "$GHCR_USER" --password-stdin
+                        docker build --file product-service/Dockerfile --tag "$REGISTRY/product-service:$IMAGE_TAG" .
+                        docker build --file order-service/Dockerfile --tag "$REGISTRY/order-service:$IMAGE_TAG" .
+                        docker push "$REGISTRY/product-service:$IMAGE_TAG"
+                        docker push "$REGISTRY/order-service:$IMAGE_TAG"
+                    '''
+                }
+            }
+        }
+
+        stage('Deploy Test') {
+            steps {
+                withCredentials([file(credentialsId: 'kubeconfig-test', variable: 'KUBECONFIG')]) {
+                    sh '''
+                        set -eu
+                        mkdir -p .rendered
+                        kubectl kustomize k8s/overlays/test \
+                          | sed "s#$REGISTRY/product-service:test#$REGISTRY/product-service:$IMAGE_TAG#g; s#$REGISTRY/order-service:test#$REGISTRY/order-service:$IMAGE_TAG#g" \
+                          > .rendered/test.yml
+                        kubectl apply --filename .rendered/test.yml
+                        kubectl --namespace microservices-test rollout status deployment/product-service --timeout=180s
+                        kubectl --namespace microservices-test rollout status deployment/order-service --timeout=180s
+                    '''
+                }
+            }
+        }
+
+        stage('Smoke Test') {
+            steps {
+                withCredentials([file(credentialsId: 'kubeconfig-test', variable: 'KUBECONFIG')]) {
+                    sh '''
+                        set -eu
+                        kubectl --namespace microservices-test port-forward service/order-service 18082:8082 > .rendered/port-forward.log 2>&1 &
+                        PORT_FORWARD_PID=$!
+                        trap 'kill "$PORT_FORWARD_PID" 2>/dev/null || true' EXIT INT TERM
+                        ready=false
+                        for attempt in $(seq 1 30); do
+                          if curl --fail --silent http://127.0.0.1:18082/actuator/health >/dev/null; then
+                            ready=true
+                            break
+                          fi
+                          sleep 1
+                        done
+                        [ "$ready" = true ]
+                        ORDER_SERVICE_URL=http://127.0.0.1:18082 scripts/smoke-test.sh
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            sh 'docker logout ghcr.io >/dev/null 2>&1 || true'
+            sh 'rm -rf .rendered'
+        }
+    }
+}

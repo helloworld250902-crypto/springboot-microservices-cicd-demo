@@ -1,0 +1,97 @@
+pipeline {
+    agent any
+
+    options {
+        disableConcurrentBuilds()
+        timestamps()
+    }
+
+    parameters {
+        string(name: 'IMAGE_TAG', defaultValue: '', description: '已在测试环境通过的 7 至 40 位 Git SHA')
+        string(name: 'CONFIRM_DEPLOYMENT', defaultValue: '', description: '输入 DEPLOY 才执行生产发布')
+    }
+
+    environment {
+        REGISTRY = 'ghcr.io/helloworld250902-crypto'
+    }
+
+    stages {
+        stage('Validate Parameters') {
+            steps {
+                script {
+                    if (!(params.IMAGE_TAG ==~ /^[0-9a-fA-F]{7,40}$/)) {
+                        error('IMAGE_TAG 必须是 7 至 40 位十六进制 Git SHA')
+                    }
+                    if (!(params.CONFIRM_DEPLOYMENT == 'DEPLOY')) {
+                        error('CONFIRM_DEPLOYMENT 必须严格等于 DEPLOY')
+                    }
+                    env.IMAGE_TAG = params.IMAGE_TAG.toLowerCase()
+                }
+            }
+        }
+
+        stage('Verify Existing Images') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'github-container-registry',
+                    usernameVariable: 'GHCR_USER',
+                    passwordVariable: 'GHCR_TOKEN'
+                )]) {
+                    sh '''
+                        set -eu
+                        echo "$GHCR_TOKEN" | docker login ghcr.io --username "$GHCR_USER" --password-stdin
+                        docker manifest inspect "$REGISTRY/product-service:$IMAGE_TAG" >/dev/null
+                        docker manifest inspect "$REGISTRY/order-service:$IMAGE_TAG" >/dev/null
+                    '''
+                }
+            }
+        }
+
+        stage('Deploy Production') {
+            steps {
+                withCredentials([file(credentialsId: 'kubeconfig-production', variable: 'KUBECONFIG')]) {
+                    sh '''
+                        set -eu
+                        mkdir -p .rendered
+                        kubectl kustomize k8s/overlays/production \
+                          | sed "s#$REGISTRY/product-service:production#$REGISTRY/product-service:$IMAGE_TAG#g; s#$REGISTRY/order-service:production#$REGISTRY/order-service:$IMAGE_TAG#g" \
+                          > .rendered/production.yml
+                        kubectl apply --filename .rendered/production.yml
+                        kubectl --namespace microservices-production rollout status deployment/product-service --timeout=300s
+                        kubectl --namespace microservices-production rollout status deployment/order-service --timeout=300s
+                    '''
+                }
+            }
+        }
+
+        stage('Smoke Test Production') {
+            steps {
+                withCredentials([file(credentialsId: 'kubeconfig-production', variable: 'KUBECONFIG')]) {
+                    sh '''
+                        set -eu
+                        kubectl --namespace microservices-production port-forward service/order-service 18082:8082 > .rendered/port-forward.log 2>&1 &
+                        PORT_FORWARD_PID=$!
+                        trap 'kill "$PORT_FORWARD_PID" 2>/dev/null || true' EXIT INT TERM
+                        ready=false
+                        for attempt in $(seq 1 30); do
+                          if curl --fail --silent http://127.0.0.1:18082/actuator/health >/dev/null; then
+                            ready=true
+                            break
+                          fi
+                          sleep 1
+                        done
+                        [ "$ready" = true ]
+                        ORDER_SERVICE_URL=http://127.0.0.1:18082 scripts/smoke-test.sh
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            sh 'docker logout ghcr.io >/dev/null 2>&1 || true'
+            sh 'rm -rf .rendered'
+        }
+    }
+}
