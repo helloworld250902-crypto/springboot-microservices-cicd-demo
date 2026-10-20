@@ -1,0 +1,15 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: microservices-test
+resources:
+  - ../../base
+  - namespace.yml
+commonLabels:
+  environment: test
+images:
+  - name: ghcr.io/helloworld250902-crypto/product-service
+    newTag: test
+  - name: ghcr.io/helloworld250902-crypto/order-service
+    newTag: test
+patches:
+  - path: replicas.yml

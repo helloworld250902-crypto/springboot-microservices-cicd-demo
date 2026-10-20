@@ -1,0 +1,15 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: microservices-production
+resources:
+  - ../../base
+  - namespace.yml
+commonLabels:
+  environment: production
+images:
+  - name: ghcr.io/helloworld250902-crypto/product-service
+    newTag: production
+  - name: ghcr.io/helloworld250902-crypto/order-service
+    newTag: production
+patches:
+  - path: replicas.yml
