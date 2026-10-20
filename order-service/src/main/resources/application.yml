@@ -8,6 +8,7 @@ spring:
 
 product-service:
   base-url: ${PRODUCT_SERVICE_URL:http://localhost:8081}
+  timeout: ${PRODUCT_SERVICE_TIMEOUT:2s}
 
 management:
   endpoints:

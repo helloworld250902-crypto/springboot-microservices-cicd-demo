@@ -6,6 +6,7 @@ target/
 .superpowers/
 work/
 .rendered/
+.docker-config.*
 .env
 .env.*
 *.kubeconfig

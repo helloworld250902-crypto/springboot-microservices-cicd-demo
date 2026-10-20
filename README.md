@@ -132,10 +132,14 @@ kubectl kustomize k8s/overlays/test
 kubectl kustomize k8s/overlays/production
 ```
 
-手动部署示例：
+手动部署时必须使用 GHCR 中真实存在的 Git SHA 标签；配置里的 `test` 只是
+overlay 的可识别占位标签，不能直接发布：
 
 ```bash
-kubectl apply -k k8s/overlays/test
+IMAGE_TAG=替换为已经推送到GHCR的Git提交SHA
+kubectl kustomize k8s/overlays/test \
+  | sed "s#ghcr.io/helloworld250902-crypto/product-service:test#ghcr.io/helloworld250902-crypto/product-service:$IMAGE_TAG#g; s#ghcr.io/helloworld250902-crypto/order-service:test#ghcr.io/helloworld250902-crypto/order-service:$IMAGE_TAG#g" \
+  | kubectl apply -f -
 kubectl -n microservices-test rollout status deployment/product-service
 kubectl -n microservices-test rollout status deployment/order-service
 ```
@@ -241,7 +245,8 @@ ORDER_SERVICE_URL=https://test.example.com bash scripts/smoke-test.sh
 ## 9. 常见问题
 
 - **订单服务返回 503**：检查 `PRODUCT_SERVICE_URL`、产品服务健康状态和容器或
-  集群 DNS；在 Pod 中它应为 `http://product-service:8081`。
+  集群 DNS；在 Pod 中它应为 `http://product-service:8081`。默认连接和读取超时
+  均为 2 秒，可通过 `PRODUCT_SERVICE_TIMEOUT`（如 `5s`）调整。
 - **镜像拉取失败**：确认两个 namespace 都有 `ghcr-pull-secret`，Token 仍有效，
   GHCR package 可访问，Deployment 引用的 SHA 标签存在。
 - **Webhook 不触发**：查看 GitHub Webhook Recent Deliveries、Jenkins 公网可达性、

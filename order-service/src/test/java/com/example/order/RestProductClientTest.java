@@ -7,6 +7,7 @@ import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -29,6 +30,14 @@ class RestProductClientTest {
         });
         server.createContext("/api/products/999", exchange -> {
             exchange.sendResponseHeaders(404, -1);
+            exchange.close();
+        });
+        server.createContext("/api/products/2", exchange -> {
+            try {
+                Thread.sleep(1_000);
+            } catch (InterruptedException exception) {
+                Thread.currentThread().interrupt();
+            }
             exchange.close();
         });
         server.start();
@@ -63,6 +72,14 @@ class RestProductClientTest {
         server = null;
 
         assertThatThrownBy(() -> client.getProduct(1L))
+                .isInstanceOf(ProductServiceUnavailableException.class);
+    }
+
+    @Test
+    void mapsReadTimeout() {
+        RestProductClient client = new RestProductClient(baseUrl, Duration.ofMillis(100));
+
+        assertThatThrownBy(() -> client.getProduct(2L))
                 .isInstanceOf(ProductServiceUnavailableException.class);
     }
 }

@@ -39,6 +39,9 @@ pipeline {
                 )]) {
                     sh '''
                         set -eu
+                        DOCKER_CONFIG=$(mktemp -d "$WORKSPACE/.docker-config.XXXXXX")
+                        export DOCKER_CONFIG
+                        trap 'docker logout ghcr.io >/dev/null 2>&1 || true; rm -rf "$DOCKER_CONFIG"' EXIT INT TERM
                         echo "$GHCR_TOKEN" | docker login ghcr.io --username "$GHCR_USER" --password-stdin
                         docker manifest inspect "$REGISTRY/product-service:$IMAGE_TAG" >/dev/null
                         docker manifest inspect "$REGISTRY/order-service:$IMAGE_TAG" >/dev/null
@@ -69,19 +72,20 @@ pipeline {
                 withCredentials([file(credentialsId: 'kubeconfig-production', variable: 'KUBECONFIG')]) {
                     sh '''
                         set -eu
-                        kubectl --namespace microservices-production port-forward service/order-service 18082:8082 > .rendered/port-forward.log 2>&1 &
+                        kubectl --namespace microservices-production port-forward service/order-service 18083:8082 > .rendered/port-forward.log 2>&1 &
                         PORT_FORWARD_PID=$!
                         trap 'kill "$PORT_FORWARD_PID" 2>/dev/null || true' EXIT INT TERM
                         ready=false
                         for attempt in $(seq 1 30); do
-                          if curl --fail --silent http://127.0.0.1:18082/actuator/health >/dev/null; then
+                          if curl --fail --silent http://127.0.0.1:18083/actuator/health >/dev/null; then
                             ready=true
                             break
                           fi
                           sleep 1
                         done
                         [ "$ready" = true ]
-                        ORDER_SERVICE_URL=http://127.0.0.1:18082 scripts/smoke-test.sh
+                        kill -0 "$PORT_FORWARD_PID"
+                        ORDER_SERVICE_URL=http://127.0.0.1:18083 scripts/smoke-test.sh
                     '''
                 }
             }
@@ -90,7 +94,6 @@ pipeline {
 
     post {
         always {
-            sh 'docker logout ghcr.io >/dev/null 2>&1 || true'
             sh 'rm -rf .rendered'
         }
     }
