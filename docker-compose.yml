@@ -1,0 +1,31 @@
+services:
+  product-service:
+    image: microservices-demo/product-service:local
+    build:
+      context: .
+      dockerfile: product-service/Dockerfile
+    ports:
+      - "8081:8081"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8081/actuator/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  order-service:
+    image: microservices-demo/order-service:local
+    build:
+      context: .
+      dockerfile: order-service/Dockerfile
+    environment:
+      PRODUCT_SERVICE_URL: http://product-service:8081
+    ports:
+      - "8082:8082"
+    depends_on:
+      product-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8082/actuator/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20

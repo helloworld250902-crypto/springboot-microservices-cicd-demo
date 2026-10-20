@@ -1,0 +1,9 @@
+**
+!product-service/
+!product-service/Dockerfile
+!product-service/target/
+!product-service/target/product-service-*.jar
+!order-service/
+!order-service/Dockerfile
+!order-service/target/
+!order-service/target/order-service-*.jar
