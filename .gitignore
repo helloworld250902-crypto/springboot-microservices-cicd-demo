@@ -5,4 +5,9 @@ target/
 .DS_Store
 .superpowers/
 work/
+.rendered/
+.env
+.env.*
+*.kubeconfig
+kubeconfig
 
