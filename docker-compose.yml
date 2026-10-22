@@ -1,6 +1,6 @@
 services:
   rabbitmq:
-    image: rabbitmq:4.1-management
+    image: rabbitmq:4.1.8-management
     environment:
       RABBITMQ_DEFAULT_USER: app
       RABBITMQ_DEFAULT_PASS: app-secret
@@ -14,7 +14,7 @@ services:
       retries: 20
 
   redis:
-    image: redis:7.4-alpine
+    image: redis:7.4.11-alpine
     ports:
       - "6379:6379"
     healthcheck:

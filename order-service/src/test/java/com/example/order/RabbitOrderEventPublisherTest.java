@@ -10,6 +10,8 @@ import com.example.events.OrderCreatedEvent;
 import java.time.Duration;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.springframework.amqp.core.Message;
+import org.springframework.amqp.core.ReturnedMessage;
 import org.springframework.amqp.rabbit.connection.CorrelationData;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 
@@ -41,6 +43,29 @@ class RabbitOrderEventPublisherTest {
         assertThatThrownBy(() -> publisher.publish(event))
                 .isInstanceOf(OrderEventPublishException.class)
                 .hasMessageContaining("confirm");
+    }
+
+    @Test
+    void rejectsOrderWhenBrokerAcknowledgesButReturnsUnroutableEvent() {
+        doAnswer(invocation -> {
+            CorrelationData correlationData = invocation.getArgument(3);
+            correlationData.setReturned(new ReturnedMessage(
+                    new Message(new byte[0]),
+                    312,
+                    "NO_ROUTE",
+                    RabbitOrderConfiguration.ORDERS_EXCHANGE,
+                    RabbitOrderConfiguration.ORDER_CREATED_ROUTING_KEY));
+            correlationData.getFuture().complete(new CorrelationData.Confirm(true, null));
+            return null;
+        }).when(rabbitTemplate).convertAndSend(
+                eq(RabbitOrderConfiguration.ORDERS_EXCHANGE),
+                eq(RabbitOrderConfiguration.ORDER_CREATED_ROUTING_KEY),
+                eq(event),
+                any(CorrelationData.class));
+
+        assertThatThrownBy(() -> publisher.publish(event))
+                .isInstanceOf(OrderEventPublishException.class)
+                .hasMessageContaining("NO_ROUTE");
     }
 
     private void completeConfirmation(boolean ack, String reason) {

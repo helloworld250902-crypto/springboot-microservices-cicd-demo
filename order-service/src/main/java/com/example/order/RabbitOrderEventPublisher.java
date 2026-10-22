@@ -37,6 +37,10 @@ public class RabbitOrderEventPublisher implements OrderEventPublisher {
             if (!confirm.ack()) {
                 throw new OrderEventPublishException(confirm.reason());
             }
+            if (correlationData.getReturned() != null) {
+                throw new OrderEventPublishException(
+                        "Message returned by broker: " + correlationData.getReturned().getReplyText());
+            }
         } catch (OrderEventPublishException exception) {
             throw exception;
         } catch (AmqpException exception) {

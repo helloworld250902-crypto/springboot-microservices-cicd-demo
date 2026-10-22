@@ -261,6 +261,7 @@ checkout → Maven verify → Docker build → GHCR push
 bash -n scripts/*.sh
 bash scripts/smoke-test-self-test.sh
 bash scripts/verify-pipelines.sh
+bash scripts/verify-deployment-config.sh
 docker compose config
 kubectl kustomize k8s/overlays/test
 kubectl kustomize k8s/overlays/production

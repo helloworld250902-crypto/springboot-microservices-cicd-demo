@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.example.events.OrderCreatedEvent;
@@ -99,6 +100,22 @@ class InventoryMessageListenerTest {
         listener.handle(event);
 
         verify(lock, never()).unlock();
+    }
+
+    @Test
+    void rejectsMalformedEventsBeforeAcquiringLock() {
+        assertInvalidEvent(new OrderCreatedEvent(null, 1L, 2));
+        assertInvalidEvent(new OrderCreatedEvent(UUID.randomUUID(), 0L, 2));
+        assertInvalidEvent(new OrderCreatedEvent(UUID.randomUUID(), 1L, 0));
+        assertInvalidEvent(new OrderCreatedEvent(UUID.randomUUID(), 1L, -2));
+
+        verifyNoInteractions(redissonClient, inventoryStore);
+    }
+
+    private void assertInvalidEvent(OrderCreatedEvent invalidEvent) {
+        assertThatThrownBy(() -> listener.handle(invalidEvent))
+                .isInstanceOf(AmqpRejectAndDontRequeueException.class)
+                .hasMessageContaining("Invalid order event");
     }
 
     private void lockAcquired() throws InterruptedException {

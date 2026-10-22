@@ -8,6 +8,7 @@ import org.springframework.amqp.core.QueueBuilder;
 import org.springframework.amqp.core.TopicExchange;
 import org.springframework.amqp.support.converter.JacksonJsonMessageConverter;
 import org.springframework.amqp.support.converter.MessageConverter;
+import org.springframework.boot.amqp.autoconfigure.RabbitListenerRetrySettingsCustomizer;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -61,5 +62,22 @@ public class RabbitInventoryConfiguration {
     @Bean
     MessageConverter rabbitMessageConverter() {
         return new JacksonJsonMessageConverter();
+    }
+
+    @Bean
+    RabbitListenerRetrySettingsCustomizer inventoryRetrySettingsCustomizer() {
+        return settings -> settings.setExceptionPredicate(
+                RabbitInventoryConfiguration::isTransientLockFailure);
+    }
+
+    private static boolean isTransientLockFailure(Throwable failure) {
+        Throwable current = failure;
+        while (current != null) {
+            if (current instanceof InventoryLockUnavailableException) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 }

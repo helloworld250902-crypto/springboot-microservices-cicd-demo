@@ -34,6 +34,12 @@ public class InventoryMessageListener {
 
     @RabbitListener(queues = RabbitInventoryConfiguration.ORDER_CREATED_QUEUE)
     public void handle(OrderCreatedEvent event) {
+        if (event == null
+                || event.orderId() == null
+                || event.productId() <= 0
+                || event.quantity() <= 0) {
+            throw rejected("Invalid order event");
+        }
         RLock lock = redissonClient.getLock("lock:inventory:" + event.productId());
         boolean acquired = false;
         try {
