@@ -60,6 +60,8 @@ pipeline {
                           | sed "s#$REGISTRY/product-service:production#$REGISTRY/product-service:$IMAGE_TAG#g; s#$REGISTRY/order-service:production#$REGISTRY/order-service:$IMAGE_TAG#g" \
                           > .rendered/production.yml
                         kubectl apply --filename .rendered/production.yml
+                        kubectl --namespace microservices-production rollout status deployment/rabbitmq --timeout=300s
+                        kubectl --namespace microservices-production rollout status deployment/redis --timeout=300s
                         kubectl --namespace microservices-production rollout status deployment/product-service --timeout=300s
                         kubectl --namespace microservices-production rollout status deployment/order-service --timeout=300s
                     '''
@@ -72,20 +74,30 @@ pipeline {
                 withCredentials([file(credentialsId: 'kubeconfig-production', variable: 'KUBECONFIG')]) {
                     sh '''
                         set -eu
-                        kubectl --namespace microservices-production port-forward service/order-service 18083:8082 > .rendered/port-forward.log 2>&1 &
-                        PORT_FORWARD_PID=$!
-                        trap 'kill "$PORT_FORWARD_PID" 2>/dev/null || true' EXIT INT TERM
+                        kubectl --namespace microservices-production port-forward service/product-service 18084:8081 > .rendered/product-port-forward.log 2>&1 &
+                        PRODUCT_PORT_FORWARD_PID=$!
+                        kubectl --namespace microservices-production port-forward service/order-service 18083:8082 > .rendered/order-port-forward.log 2>&1 &
+                        ORDER_PORT_FORWARD_PID=$!
+                        cleanup_port_forwards() {
+                          kill "$PRODUCT_PORT_FORWARD_PID" "$ORDER_PORT_FORWARD_PID" 2>/dev/null || true
+                          wait "$PRODUCT_PORT_FORWARD_PID" "$ORDER_PORT_FORWARD_PID" 2>/dev/null || true
+                        }
+                        trap cleanup_port_forwards EXIT INT TERM
                         ready=false
                         for attempt in $(seq 1 30); do
-                          if curl --fail --silent http://127.0.0.1:18083/actuator/health >/dev/null; then
+                          if curl --fail --silent http://127.0.0.1:18084/actuator/health >/dev/null \
+                            && curl --fail --silent http://127.0.0.1:18083/actuator/health >/dev/null; then
                             ready=true
                             break
                           fi
                           sleep 1
                         done
                         [ "$ready" = true ]
-                        kill -0 "$PORT_FORWARD_PID"
-                        ORDER_SERVICE_URL=http://127.0.0.1:18083 scripts/smoke-test.sh
+                        kill -0 "$PRODUCT_PORT_FORWARD_PID"
+                        kill -0 "$ORDER_PORT_FORWARD_PID"
+                        PRODUCT_SERVICE_URL=http://127.0.0.1:18084 \
+                        ORDER_SERVICE_URL=http://127.0.0.1:18083 \
+                          scripts/smoke-test.sh
                     '''
                 }
             }

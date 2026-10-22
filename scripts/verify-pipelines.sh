@@ -40,8 +40,15 @@ require_text "$TEST_PIPELINE" 'DOCKER_CONFIG=$(mktemp -d'
 require_text "$TEST_PIPELINE" "kubeconfig-test"
 require_text "$TEST_PIPELINE" "k8s/overlays/test"
 require_text "$TEST_PIPELINE" "scripts/smoke-test.sh"
+require_text "$TEST_PIPELINE" "deployment/rabbitmq"
+require_text "$TEST_PIPELINE" "deployment/redis"
+require_text "$TEST_PIPELINE" "18081:8081"
 require_text "$TEST_PIPELINE" "18082:8082"
-require_text "$TEST_PIPELINE" 'kill -0 "$PORT_FORWARD_PID"'
+require_text "$TEST_PIPELINE" 'PRODUCT_SERVICE_URL=http://127.0.0.1:18081'
+require_text "$TEST_PIPELINE" 'ORDER_SERVICE_URL=http://127.0.0.1:18082'
+require_text "$TEST_PIPELINE" 'kill -0 "$PRODUCT_PORT_FORWARD_PID"'
+require_text "$TEST_PIPELINE" 'kill -0 "$ORDER_PORT_FORWARD_PID"'
+require_text "$TEST_PIPELINE" 'kill "$PRODUCT_PORT_FORWARD_PID" "$ORDER_PORT_FORWARD_PID"'
 
 reject_text "$PRODUCTION_PIPELINE" "triggers {"
 require_text "$PRODUCTION_PIPELINE" "IMAGE_TAG"
@@ -53,8 +60,15 @@ require_text "$PRODUCTION_PIPELINE" 'DOCKER_CONFIG=$(mktemp -d'
 require_text "$PRODUCTION_PIPELINE" "kubeconfig-production"
 require_text "$PRODUCTION_PIPELINE" "k8s/overlays/production"
 require_text "$PRODUCTION_PIPELINE" "scripts/smoke-test.sh"
+require_text "$PRODUCTION_PIPELINE" "deployment/rabbitmq"
+require_text "$PRODUCTION_PIPELINE" "deployment/redis"
+require_text "$PRODUCTION_PIPELINE" "18084:8081"
 require_text "$PRODUCTION_PIPELINE" "18083:8082"
-require_text "$PRODUCTION_PIPELINE" 'kill -0 "$PORT_FORWARD_PID"'
+require_text "$PRODUCTION_PIPELINE" 'PRODUCT_SERVICE_URL=http://127.0.0.1:18084'
+require_text "$PRODUCTION_PIPELINE" 'ORDER_SERVICE_URL=http://127.0.0.1:18083'
+require_text "$PRODUCTION_PIPELINE" 'kill -0 "$PRODUCT_PORT_FORWARD_PID"'
+require_text "$PRODUCTION_PIPELINE" 'kill -0 "$ORDER_PORT_FORWARD_PID"'
+require_text "$PRODUCTION_PIPELINE" 'kill "$PRODUCT_PORT_FORWARD_PID" "$ORDER_PORT_FORWARD_PID"'
 reject_text "$PRODUCTION_PIPELINE" "docker build"
 reject_text "$PRODUCTION_PIPELINE" "mvnw"
 

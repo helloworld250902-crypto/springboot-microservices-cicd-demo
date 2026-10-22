@@ -1,16 +1,20 @@
 # Spring Boot 微服务 CI/CD 完整示例
 
-这是一个可以逐层学习的双微服务项目：先用 Maven 构建 Spring Boot，再用
-Docker 封装镜像，用 Kubernetes 部署，最后由 Jenkins 串起 GitHub、GHCR 和两套
-环境。测试环境由 GitHub Push 自动触发，生产环境必须手动输入参数触发。
+这是一个可以逐层学习的消息驱动微服务项目：订单服务向 RabbitMQ 发布订单事件，
+商品服务消费事件后使用 Redis、Redisson 分布式锁和幂等脚本扣减共享库存。交付侧
+由 Maven 构建和测试，Docker 封装镜像，Kubernetes 部署，Jenkins 串起 GitHub、
+GHCR 和两套环境。测试环境由 `develop` Push 自动触发，生产环境必须手动触发。
 
 ## 一眼看懂各工具的作用
 
 | 工具 | 本项目中的职责 | 主要入口 |
 | --- | --- | --- |
-| Maven | 管理依赖、编译、测试、打包两个可运行 JAR | 根目录 `pom.xml`、各模块 `pom.xml`、`mvnw` |
+| Maven | 聚合契约和业务模块，管理依赖、编译、测试、打包两个可运行 JAR | 根目录 `pom.xml`、各模块 `pom.xml`、`mvnw` |
 | Spring Boot | 实现产品服务和订单服务 | `product-service`、`order-service` |
-| Docker | 把 JAR 和 Java 21 运行时封装成不可变镜像 | 两个 `Dockerfile`、`docker-compose.yml` |
+| RabbitMQ | 接收并转发 `OrderCreatedEvent`，失败消息进入 DLQ | 两个 Rabbit 配置类、`orders.exchange` |
+| Redis / Redisson | 保存共享库存和幂等标记；按商品 ID 提供分布式锁 | `RedisInventoryStore`、`InventoryMessageListener` |
+| Docker | 把业务 JAR 封装成镜像；Compose 在本地协调四个组件 | 两个 `Dockerfile`、`docker-compose.yml` |
+| GHCR | 保存 Jenkins 构建的、以 Git SHA 标记的两个业务镜像 | `ghcr.io/helloworld250902-crypto/*` |
 | Kubernetes | 运行镜像，提供服务发现、探针、副本和环境隔离 | `k8s/base`、`k8s/overlays` |
 | Jenkins | 按规则调用 Maven、Docker、GHCR、Kubernetes 和冒烟脚本 | `jenkins/Jenkinsfile.*` |
 | GitHub | 保存代码、发出 Push Webhook、托管 GHCR 镜像 | `main`、`develop`、Packages |
@@ -22,10 +26,11 @@ Docker 封装镜像，用 Kubernetes 部署，最后由 Jenkins 串起 GitHub、
 
 ```text
 .
-├── pom.xml                         # Maven 父工程，聚合两个模块
-├── product-service/                # GET /api/products/{id}，端口 8081
-├── order-service/                  # POST /api/orders，端口 8082
-├── docker-compose.yml              # 本地双容器编排
+├── pom.xml                         # Maven 父工程，聚合三个模块
+├── event-contracts/                # 两个服务共享的 OrderCreatedEvent
+├── product-service/                # 查询商品、监听消息、扣库存，端口 8081
+├── order-service/                  # 创建订单、发布消息，端口 8082
+├── docker-compose.yml              # 本地四组件编排
 ├── k8s/
 │   ├── base/                       # 环境无关的 Deployment/Service
 │   └── overlays/{test,production}/ # 命名空间、标签、镜像标签、副本数
@@ -35,9 +40,10 @@ Docker 封装镜像，用 Kubernetes 部署，最后由 Jenkins 串起 GitHub、
 └── scripts/                        # 冒烟测试及流水线合同检查
 ```
 
-服务调用关系：客户端调用订单服务；订单服务读取 `PRODUCT_SERVICE_URL`，通过
-HTTP 调用产品服务。Compose 和 Kubernetes 都使用 `product-service` 作为内部
-DNS，所以同一份应用代码不需要感知运行平台。
+业务调用关系：客户端调用订单服务；订单服务先通过 HTTP 查询商品，再向 RabbitMQ
+发布事件；商品服务监听事件，获取 `lock:inventory:{productId}`，最后用 Redis Lua
+脚本一次完成库存校验、扣减和 `processed-order:{orderId}` 幂等标记。HTTP 201 表示
+事件已被 RabbitMQ 确认，不表示异步库存已经扣完。
 
 ## 先决条件
 
@@ -59,8 +65,9 @@ kubectl version --client
 
 ## 1. Maven：编译、测试与打包
 
-根 `pom.xml` 先加载父级 Spring Boot 版本，再按顺序构建 `product-service` 和
-`order-service`。模块 POM 声明 Web、Validation、Actuator 和测试依赖；
+根 `pom.xml` 先加载父级 Spring Boot 版本，再按顺序构建 `event-contracts`、
+`product-service` 和 `order-service`。模块 POM 声明 Web、AMQP、Redis、Redisson、
+Validation、Actuator 和测试依赖；
 `spring-boot-maven-plugin` 把普通 JAR 重打包为可直接运行的 Boot JAR。
 
 ```bash
@@ -74,14 +81,22 @@ product-service/target/product-service-1.0.0-SNAPSHOT.jar
 order-service/target/order-service-1.0.0-SNAPSHOT.jar
 ```
 
-直接运行时开两个终端：
+直接运行前要有 RabbitMQ 和 Redis；最省事是先启动这两个依赖：
 
 ```bash
+docker compose up --detach rabbitmq redis
+```
+
+然后开两个终端：
+
+```bash
+RABBITMQ_USERNAME=app RABBITMQ_PASSWORD=app-secret \
 java -jar product-service/target/product-service-1.0.0-SNAPSHOT.jar
 ```
 
 ```bash
 PRODUCT_SERVICE_URL=http://localhost:8081 \
+RABBITMQ_USERNAME=app RABBITMQ_PASSWORD=app-secret \
 java -jar order-service/target/order-service-1.0.0-SNAPSHOT.jar
 ```
 
@@ -94,9 +109,10 @@ curl --request POST http://localhost:8082/api/orders \
   --data '{"productId":1,"quantity":2}'
 ```
 
-第二个响应应为 HTTP 201，且 `totalPrice` 为 `1198.00`。
+第二个响应应为 HTTP 201，且 `totalPrice` 为 `1198.00`；随后重复查询商品，库存会
+从当前值异步减少 2。
 
-## 2. Docker：从 JAR 到本地双容器
+## 2. Docker：从 JAR 到本地四组件
 
 Dockerfile 不负责编译；它只复制 Maven 已产生的 JAR。这样本地和 Jenkins 都是
 先验证源码，再封装已经通过测试的制品。
@@ -106,24 +122,36 @@ Dockerfile 不负责编译；它只复制 Maven 已产生的 JAR。这样本地�
 docker compose config
 docker compose up --build --detach
 bash scripts/smoke-test.sh
-docker compose down
+docker compose down --volumes --remove-orphans
 ```
 
-`docker-compose.yml` 先等待产品服务健康，再启动订单服务，并注入：
+`docker-compose.yml` 负责启动 Redis、RabbitMQ、商品服务和订单服务，按健康状态
+协调启动顺序，并注入：
 
 ```text
 PRODUCT_SERVICE_URL=http://product-service:8081
+RABBITMQ_HOST=rabbitmq
+REDIS_HOST=redis
+```
+
+RabbitMQ 管理页面是 <http://localhost:15672>，演示账号为 `app` / `app-secret`。
+查看 Redis 库存和幂等标记：
+
+```bash
+docker compose exec redis redis-cli GET inventory:1
+docker compose exec redis redis-cli KEYS 'processed-order:*'
 ```
 
 ## 3. Kubernetes：base 与环境 overlay
 
-`k8s/base` 定义两个 Deployment、两个 ClusterIP Service、Actuator 探针、资源
-限制和 `ghcr-pull-secret`。overlay 只表达环境差异：
+`k8s/base` 定义四个 Deployment、四个 ClusterIP Service、探针和资源限制。
+`rabbitmq-credentials` 只含可公开的教学密码；`ghcr-pull-secret` 仍要预先在集群
+创建。overlay 只表达环境差异：
 
-| 环境 | Namespace | 副本数 | 配置中的初始标签 |
-| --- | --- | ---: | --- |
-| 测试 | `microservices-test` | 1 | `test` |
-| 生产 | `microservices-production` | 2 | `production` |
+| 环境 | Namespace | 业务副本数 | RabbitMQ/Redis 副本数 | 配置中的初始标签 |
+| --- | --- | ---: | ---: | --- |
+| 测试 | `microservices-test` | 各 1 | 各 1 | `test` |
+| 生产 | `microservices-production` | 各 2 | 各 1 | `production` |
 
 先只渲染检查，不修改集群：
 
@@ -142,6 +170,8 @@ kubectl kustomize k8s/overlays/test \
   | kubectl apply -f -
 kubectl -n microservices-test rollout status deployment/product-service
 kubectl -n microservices-test rollout status deployment/order-service
+kubectl -n microservices-test rollout status deployment/rabbitmq
+kubectl -n microservices-test rollout status deployment/redis
 ```
 
 Jenkins 不会提交临时标签修改，而是渲染 overlay 后把 `test` 或 `production`
@@ -201,7 +231,7 @@ Jenkinsfile 只引用凭证 ID；实际用户名、Token、密码和 kubeconfig 
 
 ```text
 checkout → Maven verify → Docker build → GHCR push
-         → test overlay + Git SHA → rollout → smoke test
+         → test overlay + Git SHA → 四个 rollout → 下单并验证库存减少
 ```
 
 镜像标签来自当前提交的短 SHA，例如
@@ -221,7 +251,7 @@ checkout → Maven verify → Docker build → GHCR push
 - `CONFIRM_DEPLOYMENT`：必须严格输入 `DEPLOY`。
 
 生产流水线只执行参数校验、两个 `docker manifest inspect`、production overlay
-部署、rollout 和冒烟测试。它不会重新运行 Maven，也不会重新构建镜像，因此
+部署、四个 rollout 和冒烟测试。它不会重新运行 Maven，也不会重新构建镜像，因此
 生产使用的就是测试环境已经验证过的同一制品。
 
 ## 8. 验证命令
@@ -236,17 +266,22 @@ kubectl kustomize k8s/overlays/test
 kubectl kustomize k8s/overlays/production
 ```
 
-`scripts/smoke-test.sh` 默认访问 `http://localhost:8082`，也可指定：
+`scripts/smoke-test.sh` 默认访问订单端口 8082 和商品端口 8081，也可指定：
 
 ```bash
-ORDER_SERVICE_URL=https://test.example.com bash scripts/smoke-test.sh
+ORDER_SERVICE_URL=https://orders.test.example.com \
+PRODUCT_SERVICE_URL=https://products.test.example.com \
+bash scripts/smoke-test.sh
 ```
 
 ## 9. 常见问题
 
-- **订单服务返回 503**：检查 `PRODUCT_SERVICE_URL`、产品服务健康状态和容器或
-  集群 DNS；在 Pod 中它应为 `http://product-service:8081`。默认连接和读取超时
-  均为 2 秒，可通过 `PRODUCT_SERVICE_TIMEOUT`（如 `5s`）调整。
+- **订单服务返回 503**：除 `PRODUCT_SERVICE_URL` 外，还要检查 RabbitMQ 是否健康、
+  用户密码是否一致；发布消息未获 broker confirm 时接口不会假装成功。
+- **库存没有减少**：检查商品服务日志、Redis 的 `inventory:1`、RabbitMQ 主队列和
+  死信队列。库存不足、商品不存在会进入 `inventory.order-created.dlq`。
+- **重复消息重复扣减**：正常情况下不会发生；同一 `orderId` 的
+  `processed-order:{orderId}` 由 Lua 脚本和扣减一起原子写入。
 - **镜像拉取失败**：确认两个 namespace 都有 `ghcr-pull-secret`，Token 仍有效，
   GHCR package 可访问，Deployment 引用的 SHA 标签存在。
 - **Webhook 不触发**：查看 GitHub Webhook Recent Deliveries、Jenkins 公网可达性、
@@ -256,7 +291,13 @@ ORDER_SERVICE_URL=https://test.example.com bash scripts/smoke-test.sh
 - **本机 Java 版本错误**：设置 `JAVA_HOME` 指向 JDK 21 后重新执行 Wrapper。
 - **端口占用**：停止占用 8081、8082 或 18082 的进程，再重试。
 
-## 10. 清理
+## 10. 教学范围与生产边界
+
+本例的 RabbitMQ、Redis 都是单副本且没有持久卷，密码也是可公开的教学值，不能
+直接照搬到生产。真实生产至少还需要订单数据库、Outbox/事务消息、失败补偿、
+中间件高可用和持久化、监控告警、备份恢复以及外部 Secret 管理。
+
+## 11. 清理
 
 ```bash
 docker compose down --volumes --remove-orphans
