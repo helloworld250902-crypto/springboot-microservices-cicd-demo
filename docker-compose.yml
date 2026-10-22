@@ -1,4 +1,28 @@
 services:
+  rabbitmq:
+    image: rabbitmq:4.1-management
+    environment:
+      RABBITMQ_DEFAULT_USER: app
+      RABBITMQ_DEFAULT_PASS: app-secret
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7.4-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
   product-service:
     image: microservices-demo/product-service:local
     build:
@@ -6,6 +30,16 @@ services:
       dockerfile: product-service/Dockerfile
     ports:
       - "8081:8081"
+    environment:
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USERNAME: app
+      RABBITMQ_PASSWORD: app-secret
+      REDIS_HOST: redis
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8081/actuator/health"]
       interval: 5s
@@ -19,10 +53,15 @@ services:
       dockerfile: order-service/Dockerfile
     environment:
       PRODUCT_SERVICE_URL: http://product-service:8081
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USERNAME: app
+      RABBITMQ_PASSWORD: app-secret
     ports:
       - "8082:8082"
     depends_on:
       product-service:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8082/actuator/health"]

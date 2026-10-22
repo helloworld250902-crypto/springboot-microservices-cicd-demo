@@ -36,13 +36,17 @@ if [ "$ready" != true ]; then
   exit 1
 fi
 
-ORDER_SERVICE_URL="http://127.0.0.1:$PORT" bash "$SCRIPT_DIR/smoke-test.sh"
+ORDER_SERVICE_URL="http://127.0.0.1:$PORT" \
+PRODUCT_SERVICE_URL="http://127.0.0.1:$PORT" \
+  bash "$SCRIPT_DIR/smoke-test.sh"
 
 kill "$SERVER_PID"
 wait "$SERVER_PID" 2>/dev/null || true
 SERVER_PID=""
 
-if ORDER_SERVICE_URL="http://127.0.0.1:$PORT" bash "$SCRIPT_DIR/smoke-test.sh" >/dev/null 2>&1; then
+if ORDER_SERVICE_URL="http://127.0.0.1:$PORT" \
+  PRODUCT_SERVICE_URL="http://127.0.0.1:$PORT" \
+  bash "$SCRIPT_DIR/smoke-test.sh" >/dev/null 2>&1; then
   echo "smoke test should fail when the service is unavailable" >&2
   exit 1
 fi
