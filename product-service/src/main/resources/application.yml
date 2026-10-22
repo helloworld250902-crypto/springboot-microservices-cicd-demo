@@ -2,6 +2,22 @@ server:
   port: 8081
 
 spring:
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:app}
+    password: ${RABBITMQ_PASSWORD:app-secret}
+    listener:
+      simple:
+        default-requeue-rejected: false
+        retry:
+          enabled: true
+          max-attempts: 3
+          initial-interval: 500ms
   mvc:
     problemdetails:
       enabled: true
@@ -11,3 +27,7 @@ management:
     web:
       exposure:
         include: health
+
+inventory:
+  lock-wait: ${INVENTORY_LOCK_WAIT:2s}
+  lock-lease: ${INVENTORY_LOCK_LEASE:10s}
