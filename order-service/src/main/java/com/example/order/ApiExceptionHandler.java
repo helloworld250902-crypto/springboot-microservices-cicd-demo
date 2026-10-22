@@ -21,4 +21,12 @@ public class ApiExceptionHandler {
         problem.setTitle("Product service unavailable");
         return problem;
     }
+
+    @ExceptionHandler(OrderEventPublishException.class)
+    ProblemDetail handleOrderEventUnavailable(OrderEventPublishException exception) {
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(
+                HttpStatus.SERVICE_UNAVAILABLE, exception.getMessage());
+        problem.setTitle("Order event unavailable");
+        return problem;
+    }
 }

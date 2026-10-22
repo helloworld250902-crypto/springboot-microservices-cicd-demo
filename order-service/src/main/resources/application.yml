@@ -2,6 +2,13 @@ server:
   port: 8082
 
 spring:
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:app}
+    password: ${RABBITMQ_PASSWORD:app-secret}
+    publisher-confirm-type: correlated
+    publisher-returns: true
   mvc:
     problemdetails:
       enabled: true
@@ -9,6 +16,9 @@ spring:
 product-service:
   base-url: ${PRODUCT_SERVICE_URL:http://localhost:8081}
   timeout: ${PRODUCT_SERVICE_TIMEOUT:2s}
+
+orders:
+  publisher-confirm-timeout: ${ORDER_PUBLISHER_CONFIRM_TIMEOUT:5s}
 
 management:
   endpoints:

@@ -70,6 +70,15 @@ class OrderControllerTest {
                 .andExpect(jsonPath("$.title").value("Product service unavailable"));
     }
 
+    @Test
+    void mapsOrderEventPublishFailureToServiceUnavailable() throws Exception {
+        mockMvc.perform(post("/api/orders")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"productId\":777,\"quantity\":1}"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.title").value("Order event unavailable"));
+    }
+
     private void assertInvalid(String body) throws Exception {
         mockMvc.perform(post("/api/orders")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -90,6 +99,16 @@ class OrderControllerTest {
                     throw new ProductServiceUnavailableException(new IllegalStateException("test"));
                 }
                 return new ProductResponse(id, "Mechanical Keyboard", new BigDecimal("599.00"));
+            };
+        }
+
+        @Bean
+        @Primary
+        OrderEventPublisher fakeOrderEventPublisher() {
+            return event -> {
+                if (event.productId() == 777L) {
+                    throw new OrderEventPublishException(new IllegalStateException("test"));
+                }
             };
         }
     }
