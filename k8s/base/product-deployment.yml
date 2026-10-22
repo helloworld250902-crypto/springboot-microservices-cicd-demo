@@ -17,6 +17,21 @@ spec:
       containers:
         - name: product-service
           image: ghcr.io/helloworld250902-crypto/product-service:latest
+          env:
+            - name: RABBITMQ_HOST
+              value: rabbitmq
+            - name: RABBITMQ_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-credentials
+                  key: username
+            - name: RABBITMQ_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-credentials
+                  key: password
+            - name: REDIS_HOST
+              value: redis
           ports:
             - name: http
               containerPort: 8081

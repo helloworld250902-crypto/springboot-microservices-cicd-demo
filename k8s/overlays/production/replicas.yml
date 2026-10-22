@@ -8,6 +8,20 @@ spec:
 apiVersion: apps/v1
 kind: Deployment
 metadata:
+  name: rabbitmq
+spec:
+  replicas: 1
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+spec:
+  replicas: 1
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
   name: order-service
 spec:
   replicas: 2

@@ -20,6 +20,18 @@ spec:
           env:
             - name: PRODUCT_SERVICE_URL
               value: http://product-service:8081
+            - name: RABBITMQ_HOST
+              value: rabbitmq
+            - name: RABBITMQ_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-credentials
+                  key: username
+            - name: RABBITMQ_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: rabbitmq-credentials
+                  key: password
           ports:
             - name: http
               containerPort: 8082

@@ -5,3 +5,8 @@ resources:
   - product-service.yml
   - order-deployment.yml
   - order-service.yml
+  - rabbitmq-secret.yml
+  - rabbitmq-deployment.yml
+  - rabbitmq-service.yml
+  - redis-deployment.yml
+  - redis-service.yml
